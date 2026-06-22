@@ -8,7 +8,8 @@ import requests
 import numpy as np
 from numpy import ndarray
 import transformers
-from huggingface_hub import HfApi, HfFolder, Repository, hf_hub_url
+from huggingface_hub import HfApi, hf_hub_url
+from huggingface_hub.utils import get_token
 import torch
 from torch import nn, Tensor, device
 from torch.optim import Optimizer
@@ -23,7 +24,7 @@ from distutils.dir_util import copy_tree
 from typing import Any, Callable, Iterable, Iterator, Literal, overload, Union, List, Dict, Tuple, Optional, Type
 from sentence_transformers import __MODEL_HUB_ORGANIZATION__
 from sentence_transformers.evaluation import SentenceEvaluator
-from sentence_transformers.model_card import SentenceTransformerModelCardData, generate_model_card
+from sentence_transformers.model_card import SentenceTransformerModelCardData
 from sentence_transformers.util import import_from_string, batch_to_device, fullname, snapshot_download
 from sentence_transformers.models import Transformer, Pooling, Dense
 from sentence_transformers.model_card_templates import ModelCardTemplate
@@ -40,6 +41,8 @@ from sentence_transformers.util import (
     save_to_hub_args_decorator,
     truncate_embeddings,
 )
+import importlib
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -690,7 +693,7 @@ class WordTransformer(nn.Sequential):
         :param replace_model_card: If true, replace an existing model card in the hub with the automatically created model card
         :return: The url of the commit of your model in the given repository.
         """
-        token = HfFolder.get_token()
+        token = get_token()
         if token is None:
             raise ValueError("You must login to the Hugging Face hub on this computer by typing `transformers-cli login`.")
 
@@ -703,7 +706,8 @@ class WordTransformer(nn.Sequential):
                 raise ValueError("You passed and invalid repository name: {}.".format(repo_name))
 
         endpoint = "https://huggingface.co"
-        repo_url = HfApi(endpoint=endpoint).create_repo(
+        api = HfApi(endpoint=endpoint)
+        repo_url = api.create_repo(
                 token=token,
                 repo_id=repo_name,
                 private=private,
@@ -713,10 +717,6 @@ class WordTransformer(nn.Sequential):
         full_model_name = repo_url[len(endpoint)+1:].strip("/")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # First create the repo (and clone its content if it's nonempty).
-            logging.info("Create repository and clone it if it exists")
-            repo = Repository(tmp_dir, clone_from=repo_url)
-
             # If user provides local files, copy them.
             if local_model_path:
                 copy_tree(local_model_path, tmp_dir)
@@ -724,42 +724,13 @@ class WordTransformer(nn.Sequential):
                 create_model_card = replace_model_card or not os.path.exists(os.path.join(tmp_dir, 'README.md'))
                 self.save(tmp_dir, model_name=full_model_name, create_model_card=create_model_card)
 
-            #Find files larger 5M and track with git-lfs
-            large_files = []
-            for root, dirs, files in os.walk(tmp_dir):
-                for filename in files:
-                    file_path = os.path.join(root, filename)
-                    rel_path = os.path.relpath(file_path, tmp_dir)
-
-                    if os.path.getsize(file_path) > (5 * 1024 * 1024):
-                        large_files.append(rel_path)
-
-            if len(large_files) > 0:
-                logging.info("Track files with git lfs: {}".format(", ".join(large_files)))
-                repo.lfs_track(large_files)
-
-            logging.info("Push model to the hub. This might take a while")
-            push_return = repo.push_to_hub(commit_message=commit_message)
-
-            def on_rm_error(func, path, exc_info):
-                # path contains the path of the file that couldn't be removed
-                # let's just assume that it's read-only and unlink it.
-                try:
-                    os.chmod(path, stat.S_IWRITE)
-                    os.unlink(path)
-                except:
-                    pass
-
-            # Remove .git folder. On Windows, the .git folder might be read-only and cannot be deleted
-            # Hence, try to set write permissions on error
-            try:
-                for f in os.listdir(tmp_dir):
-                    shutil.rmtree(os.path.join(tmp_dir, f), onerror=on_rm_error)
-            except Exception as e:
-                logging.warning("Error when deleting temp folder: {}".format(str(e)))
-                pass
-
-
+            push_return = api.upload_folder(
+                folder_path=tmp_dir,
+                repo_id=full_model_name,
+                repo_type=None,
+                token=token,
+                commit_message=commit_message,
+            )
         return push_return
 
     def smart_batching_collate(self, batch):
@@ -811,7 +782,7 @@ class WordTransformer(nn.Sequential):
             steps_per_epoch = None,
             scheduler: str = 'WarmupLinear',
             warmup_steps: int = 10000,
-            optimizer_class: Type[Optimizer] = transformers.AdamW,
+            optimizer_class: Type[Optimizer] = torch.optim.AdamW,
             optimizer_params : Dict[str, object]= {'lr': 2e-5},
             weight_decay: float = 0.01,
             evaluation_steps: int = 0,
