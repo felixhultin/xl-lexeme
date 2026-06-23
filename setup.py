@@ -1,7 +1,7 @@
 import setuptools
 from pathlib import Path
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 here = Path(__file__).resolve().parent
 
 def load_requirements():
