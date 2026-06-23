@@ -1,7 +1,7 @@
 import setuptools
 from pathlib import Path
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 here = Path(__file__).resolve().parent
 
 def load_requirements():
@@ -21,7 +21,7 @@ reqs = load_requirements()
 reqs.append('sentence-transformers')
 
 setuptools.setup(
-    name="WordTransformer",
+    name="WordTransformer-LanguageChange",
     version=__version__,
     author="Pierluigi Cassotti",
     description="WiC Pretrained Model for Cross-Lingual LEXical sEMantic changE",
