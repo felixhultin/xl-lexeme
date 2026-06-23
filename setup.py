@@ -21,7 +21,7 @@ reqs = load_requirements()
 reqs.append('sentence-transformers')
 
 setuptools.setup(
-    name="WordTransformer",
+    name="WordTransformer-LanguageChange",
     version=__version__,
     author="Pierluigi Cassotti",
     description="WiC Pretrained Model for Cross-Lingual LEXical sEMantic changE",
